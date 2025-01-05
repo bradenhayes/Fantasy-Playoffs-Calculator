@@ -1,9 +1,20 @@
+import os
+import sys
 import requests
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import urllib3
-import sys
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 class SleeperFantasyAPI:
    def __init__(self):
@@ -42,7 +53,7 @@ class SleeperFantasyAPI:
    
    def get_player_stats(self, week: int) -> dict:
        """Fetch stats for a specific week using Sleeper's PPR scoring"""
-       endpoint = f"{self.base_url}/stats/nfl/regular/{self.current_nfl_season}/{week}"
+       endpoint = f"{self.base_url}/stats/nfl/post/{self.current_nfl_season}/{week}"
        print(f"Fetching stats from: {endpoint}")
        
        response = requests.get(
@@ -87,10 +98,10 @@ class SleeperFantasyAPI:
 def get_round_name(week_num):
    """Convert week number to round name"""
    playoff_round_names = {
-       19: "Round 1",
-       20: "Round 2", 
-       21: "Round 3",
-       22: "Championship"
+       1: "Round 1",
+       2: "Round 2", 
+       3: "Round 3",
+       4: "Championship"
    }
    return playoff_round_names.get(week_num, f"Week {week_num}")
 
@@ -107,7 +118,7 @@ def update_totals_sheet(service, spreadsheet_id, current_week):
        week_sheets = []
        for sheet in all_sheets:
            title = sheet['properties']['title']
-           for week_num in range(19, 23):  # Weeks 19-22 for playoffs
+           for week_num in range(1, 5):  # Weeks 1-4 for playoffs
                if get_round_name(week_num) in title:
                    week_sheets.append((week_num, title))
        
@@ -155,9 +166,19 @@ def update_totals_sheet(service, spreadsheet_id, current_week):
                    print(f"Warning: Could not process total for {owner} in week {week_num}")
                    weekly_scores[owner].append(0.0)
        
-       # Create or update Totals sheet
+       # Check if Running Totals sheet exists and create if it doesn't
        sheet_title = "Running Totals"
-       try:
+       sheet_exists = False
+       
+       # Check if Running Totals sheet already exists
+       sheets_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+       for sheet in sheets_metadata.get('sheets', ''):
+           if sheet['properties']['title'] == sheet_title:
+               sheet_exists = True
+               break
+       
+       # Create Running Totals sheet if it doesn't exist
+       if not sheet_exists:
            body = {
                'requests': [{
                    'addSheet': {
@@ -171,8 +192,6 @@ def update_totals_sheet(service, spreadsheet_id, current_week):
                spreadsheetId=spreadsheet_id,
                body=body
            ).execute()
-       except Exception as e:
-           print(f"Totals sheet might already exist: {e}")
        
        # Prepare values for the totals sheet
        values = []
@@ -219,7 +238,7 @@ def process_spreadsheet(spreadsheet_id: str, week: int):
    """Process the spreadsheet and update scores"""
    # Set up Google Sheets credentials
    credentials = service_account.Credentials.from_service_account_file(
-       "key.json", 
+       get_resource_path("key.json"), 
        scopes=["https://www.googleapis.com/auth/spreadsheets"]
    )
    
@@ -315,7 +334,7 @@ def process_spreadsheet(spreadsheet_id: str, week: int):
 
 def get_actual_week(playoff_round):
    """Convert playoff round to actual week number"""
-   return 18 + playoff_round  # NFL regular season is 18 weeks
+   return playoff_round  # No longer need to add 18
 
 def get_user_input():
    """Get playoff round from user"""
@@ -347,7 +366,7 @@ def main():
    # Suppress SSL verification warnings
    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
    
-   # Your spreadsheet ID
+   # Google Sheets spreadsheet ID
    spreadsheet_id = ""
    
    try:
